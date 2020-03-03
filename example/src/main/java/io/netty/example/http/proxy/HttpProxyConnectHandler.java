@@ -104,11 +104,8 @@ public class HttpProxyConnectHandler extends SimpleChannelInboundHandler<HttpObj
                                         outboundChannel.pipeline().addLast(new HttpRequestEncoder());
                                         outboundChannel.pipeline().addLast(new LoggingHandler(LogLevel.INFO));
                                         outboundChannel.pipeline().addLast(new RelayHandler(ctx.channel()));
-                                        WriteToOutboundChannelHandler writeToOutboundChannelHandler=ctx.pipeline().get(WriteToOutboundChannelHandler.class);
-                                        writeToOutboundChannelHandler.setOutboundChannel(outboundChannel);
-//                                        WriteToOutboundChannelHandler writeToOutboundChannelHandler = new WriteToOutboundChannelHandler(outboundChannel);
-//                                        ctx.pipeline().addLast(new HttpObjectAggregator(1000000));
-//                                        ctx.pipeline().addLast(writeToOutboundChannelHandler);
+                                        WriteToOutboundChannelHandler writeToOutboundChannelHandler = new WriteToOutboundChannelHandler(outboundChannel);
+                                        ctx.pipeline().addLast(writeToOutboundChannelHandler);
                                         request.headers().forEach(System.out::println);
 
                                         String proxyConnection=request.headers().get("Proxy-Connection");
@@ -122,16 +119,15 @@ public class HttpProxyConnectHandler extends SimpleChannelInboundHandler<HttpObj
                                         }
                                         request.setUri(url);
 
-                                        ctx.fireChannelRead(request);
-                                        contents.forEach(content->{ctx.fireChannelRead(content);});
-//                                        writeToOutboundChannelHandler.channelRead(ctx,request);
-//                                        contents.forEach(content->{
-//                                            try {
-//                                                writeToOutboundChannelHandler.channelRead(ctx,content);
-//                                            } catch (Exception e) {
-//                                                e.printStackTrace();
-//                                            }
-//                                        });
+                                        //出于未知的原因，不知道为什么fireChannelread不行
+                                        writeToOutboundChannelHandler.channelRead(ctx,request);
+                                        contents.forEach(content->{
+                                            try {
+                                                writeToOutboundChannelHandler.channelRead(ctx,content);
+                                            } catch (Exception e) {
+                                                e.printStackTrace();
+                                            }
+                                        });
                                     } else {
                                         ctx.channel().writeAndFlush(
                                                 new DefaultHttpResponse(request.protocolVersion(), INTERNAL_SERVER_ERROR)
