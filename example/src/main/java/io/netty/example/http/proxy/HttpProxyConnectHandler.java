@@ -55,6 +55,7 @@ public class HttpProxyConnectHandler extends SimpleChannelInboundHandler<HttpObj
         if (msg instanceof HttpRequest) {
             final HttpRequest req = (HttpRequest) msg;
             request=req;
+            //todo log
             System.out.println(req.method() + " " + req.uri());
             //获取Host和port
             String hostAndPortStr = req.headers().get("Host");
@@ -102,11 +103,9 @@ public class HttpProxyConnectHandler extends SimpleChannelInboundHandler<HttpObj
                                         ctx.pipeline().remove(HttpProxyConnectHandler.this);
                                         ctx.pipeline().remove(HttpResponseEncoder.class);
                                         outboundChannel.pipeline().addLast(new HttpRequestEncoder());
-                                        outboundChannel.pipeline().addLast(new LoggingHandler(LogLevel.INFO));
                                         outboundChannel.pipeline().addLast(new RelayHandler(ctx.channel()));
                                         RelayHandler clientEndtoRemoteHandler = new RelayHandler(outboundChannel);
                                         ctx.pipeline().addLast(clientEndtoRemoteHandler);
-                                        request.headers().forEach(System.out::println);
 
                                         String proxyConnection=request.headers().get("Proxy-Connection");
                                         if(Objects.nonNull(proxyConnection)){
