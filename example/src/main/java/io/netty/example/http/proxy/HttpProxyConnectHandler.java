@@ -16,31 +16,34 @@
 package io.netty.example.http.proxy;
 
 import io.netty.bootstrap.Bootstrap;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.example.socksproxy.DirectClientHandler;
 import io.netty.example.socksproxy.RelayHandler;
 import io.netty.example.socksproxy.SocksServerUtils;
 import io.netty.handler.codec.http.*;
-import io.netty.handler.codec.socksx.v4.DefaultSocks4CommandResponse;
-import io.netty.handler.codec.socksx.v4.Socks4CommandStatus;
+import io.netty.handler.logging.LogLevel;
+import io.netty.handler.logging.LoggingHandler;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.FutureListener;
 import io.netty.util.concurrent.Promise;
 
-import static io.netty.handler.codec.http.HttpHeaderNames.*;
-import static io.netty.handler.codec.http.HttpHeaderNames.CONNECTION;
-import static io.netty.handler.codec.http.HttpHeaderValues.*;
-import static io.netty.handler.codec.http.HttpHeaderValues.KEEP_ALIVE;
+import java.util.ArrayList;
+import java.util.Objects;
+
 import static io.netty.handler.codec.http.HttpResponseStatus.INTERNAL_SERVER_ERROR;
 import static io.netty.handler.codec.http.HttpResponseStatus.OK;
 
 public class HttpProxyConnectHandler extends SimpleChannelInboundHandler<HttpObject> {
-    private static final byte[] CONTENT = { 'H', 'e', 'l', 'l', 'o', ' ', 'W', 'o', 'r', 'l', 'd' };
+    private static final byte[] CONTENT = {'H', 'e', 'l', 'l', 'o', ' ', 'W', 'o', 'r', 'l', 'd'};
 
     private final Bootstrap b = new Bootstrap();
 
+    private String host;
+    private int port;
+
+    private HttpRequest request;
+    private ArrayList<HttpContent> contents=new ArrayList<>();
 
     @Override
     public void channelReadComplete(ChannelHandlerContext ctx) {
@@ -51,48 +54,101 @@ public class HttpProxyConnectHandler extends SimpleChannelInboundHandler<HttpObj
     public void channelRead0(final ChannelHandlerContext ctx, HttpObject msg) {
         if (msg instanceof HttpRequest) {
             final HttpRequest req = (HttpRequest) msg;
-            System.out.println(req.method()+" "+req.uri());
-            //如果是CONNECT
-            if(req.method().equals(HttpMethod.CONNECT)){
-                //获取Host和port
-                String hostAndPortStr = req.headers().get("Host");
-                String[] hostPortArray=hostAndPortStr.split(":");
-                String host=hostPortArray[0];
-                String portStr=hostPortArray.length==2?hostPortArray[1]:"80";
-                int port=Integer.parseInt(portStr);
-                //连接失败的promise
+            request=req;
+            System.out.println(req.method() + " " + req.uri());
+            //获取Host和port
+            String hostAndPortStr = req.headers().get("Host");
+            String[] hostPortArray = hostAndPortStr.split(":");
+            host = hostPortArray[0];
+            String portStr = hostPortArray.length == 2 ? hostPortArray[1] : "80";
+            port = Integer.parseInt(portStr);
+        }else {
+            contents.add((HttpContent) msg);
+            if(msg instanceof LastHttpContent){
                 Promise<Channel> promise = ctx.executor().newPromise();
-                promise.addListener(
-                        new FutureListener<Channel>() {
-                            @Override
-                            public void operationComplete(final Future<Channel> future) throws Exception {
-                                final Channel outboundChannel = future.getNow();
-                                if (future.isSuccess()) {
-                                    ChannelFuture responseFuture = ctx.channel().writeAndFlush(
-                                            new DefaultHttpResponse(req.protocolVersion(),OK));
+                if(request.method().equals(HttpMethod.CONNECT)){
+                    promise.addListener(
+                            new FutureListener<Channel>() {
+                                @Override
+                                public void operationComplete(final Future<Channel> future) throws Exception {
+                                    final Channel outboundChannel = future.getNow();
+                                    if (future.isSuccess()) {
+                                        ChannelFuture responseFuture = ctx.channel().writeAndFlush(
+                                                new DefaultHttpResponse(request.protocolVersion(), OK));
 
-                                    responseFuture.addListener(new ChannelFutureListener() {
-                                        @Override
-                                        public void operationComplete(ChannelFuture channelFuture) {
-                                            ctx.pipeline().remove(ChannelHandler.class);
-                                            outboundChannel.pipeline().addLast(new RelayHandler(ctx.channel()));
-                                            ctx.pipeline().addLast(new RelayHandler(outboundChannel));
-                                        }
-                                    });
-                                } else {
-                                    ctx.channel().writeAndFlush(
-                                            new DefaultHttpResponse(req.protocolVersion(),INTERNAL_SERVER_ERROR)
-                                    );
-                                    SocksServerUtils.closeOnFlush(ctx.channel());
+                                        responseFuture.addListener(new ChannelFutureListener() {
+                                            @Override
+                                            public void operationComplete(ChannelFuture channelFuture) {
+                                                ctx.pipeline().remove(ChannelHandler.class);
+                                                outboundChannel.pipeline().addLast(new RelayHandler(ctx.channel()));
+                                                ctx.pipeline().addLast(new RelayHandler(outboundChannel));
+                                            }
+                                        });
+                                    } else {
+                                        ctx.channel().writeAndFlush(
+                                                new DefaultHttpResponse(request.protocolVersion(), INTERNAL_SERVER_ERROR)
+                                        );
+                                        SocksServerUtils.closeOnFlush(ctx.channel());
+                                    }
                                 }
-                            }
-                        });
+                            });
+                }else {
+                    promise.addListener(
+                            new FutureListener<Channel>() {
+                                @Override
+                                public void operationComplete(final Future<Channel> future) throws Exception {
+                                    final Channel outboundChannel = future.getNow();
+                                    if (future.isSuccess()) {
+                                        ctx.pipeline().remove(HttpProxyConnectHandler.this);
+                                        ctx.pipeline().remove(HttpResponseEncoder.class);
+                                        outboundChannel.pipeline().addLast(new HttpRequestEncoder());
+                                        outboundChannel.pipeline().addLast(new LoggingHandler(LogLevel.INFO));
+                                        outboundChannel.pipeline().addLast(new RelayHandler(ctx.channel()));
+                                        WriteToOutboundChannelHandler writeToOutboundChannelHandler=ctx.pipeline().get(WriteToOutboundChannelHandler.class);
+                                        writeToOutboundChannelHandler.setOutboundChannel(outboundChannel);
+//                                        WriteToOutboundChannelHandler writeToOutboundChannelHandler = new WriteToOutboundChannelHandler(outboundChannel);
+//                                        ctx.pipeline().addLast(new HttpObjectAggregator(1000000));
+//                                        ctx.pipeline().addLast(writeToOutboundChannelHandler);
+                                        request.headers().forEach(System.out::println);
+
+                                        String proxyConnection=request.headers().get("Proxy-Connection");
+                                        if(Objects.nonNull(proxyConnection)){
+                                            request.headers().set("Connection",proxyConnection);
+                                            request.headers().remove("Proxy-Connection");
+                                        }
+                                        String url=request.uri().split(host)[1];
+                                        if(url.startsWith(":"+port)){
+                                            url=url.replace(":"+port,"");
+                                        }
+                                        request.setUri(url);
+
+                                        ctx.fireChannelRead(request);
+                                        contents.forEach(content->{ctx.fireChannelRead(content);});
+//                                        writeToOutboundChannelHandler.channelRead(ctx,request);
+//                                        contents.forEach(content->{
+//                                            try {
+//                                                writeToOutboundChannelHandler.channelRead(ctx,content);
+//                                            } catch (Exception e) {
+//                                                e.printStackTrace();
+//                                            }
+//                                        });
+                                    } else {
+                                        ctx.channel().writeAndFlush(
+                                                new DefaultHttpResponse(request.protocolVersion(), INTERNAL_SERVER_ERROR)
+                                        );
+                                        SocksServerUtils.closeOnFlush(ctx.channel());
+                                    }
+                                }
+                            });
+                }
+
 
                 final Channel inboundChannel = ctx.channel();
                 b.group(inboundChannel.eventLoop())
                         .channel(NioSocketChannel.class)
                         .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 10000)
                         .option(ChannelOption.SO_KEEPALIVE, true)
+                        .handler(new LoggingHandler(LogLevel.INFO))
                         .handler(new DirectClientHandler(promise));
 
                 b.connect(host, port).addListener(new ChannelFutureListener() {
@@ -104,40 +160,13 @@ public class HttpProxyConnectHandler extends SimpleChannelInboundHandler<HttpObj
                             // Close the connection if the connection attempt has failed.
                             //返回500，并关闭连接
                             ctx.channel().writeAndFlush(
-                                    new DefaultHttpResponse(req.protocolVersion(),INTERNAL_SERVER_ERROR)
+                                    new DefaultHttpResponse(request.protocolVersion(), INTERNAL_SERVER_ERROR)
                             );
                             SocksServerUtils.closeOnFlush(ctx.channel());
                         }
                     }
                 });
             }
-            else{
-                req.headers().forEach(System.out::println);
-
-                boolean keepAlive = HttpUtil.isKeepAlive(req);
-                FullHttpResponse response = new DefaultFullHttpResponse(req.protocolVersion(), OK,
-                        Unpooled.wrappedBuffer(CONTENT));
-                response.headers()
-                        .set(CONTENT_TYPE, TEXT_PLAIN)
-                        .setInt(CONTENT_LENGTH, response.content().readableBytes());
-
-                if (keepAlive) {
-                    if (!req.protocolVersion().isKeepAliveDefault()) {
-                        response.headers().set(CONNECTION, KEEP_ALIVE);
-                    }
-                } else {
-                    // Tell the client we're going to close the connection.
-                    response.headers().set(CONNECTION, CLOSE);
-                }
-
-                ChannelFuture f = ctx.write(response);
-
-                if (!keepAlive) {
-                    f.addListener(ChannelFutureListener.CLOSE);
-                }
-            }
-
-
         }
     }
 

@@ -15,6 +15,8 @@
  */
 package io.netty.example.socksproxy;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.PooledByteBufAllocator;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
@@ -37,7 +39,11 @@ public final class RelayHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) {
         if (relayChannel.isActive()) {
-            relayChannel.writeAndFlush(msg);
+            relayChannel.writeAndFlush(msg).addListener(future -> {
+                if(!future.isSuccess()){
+                    future.cause().printStackTrace();
+                }
+            });
         } else {
             ReferenceCountUtil.release(msg);
         }

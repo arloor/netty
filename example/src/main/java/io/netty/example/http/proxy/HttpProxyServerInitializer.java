@@ -18,8 +18,7 @@ package io.netty.example.http.proxy;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.handler.codec.http.HttpServerCodec;
-import io.netty.handler.codec.http.HttpServerExpectContinueHandler;
+import io.netty.handler.codec.http.*;
 import io.netty.handler.ssl.SslContext;
 
 public class HttpProxyServerInitializer extends ChannelInitializer<SocketChannel> {
@@ -36,8 +35,11 @@ public class HttpProxyServerInitializer extends ChannelInitializer<SocketChannel
         if (sslCtx != null) {
             p.addLast(sslCtx.newHandler(ch.alloc()));
         }
-        p.addLast(new HttpServerCodec());
+        p.addLast(new HttpRequestDecoder());
+        p.addLast(new HttpResponseEncoder());
         p.addLast(new HttpServerExpectContinueHandler());
         p.addLast(new HttpProxyConnectHandler());
+        p.addLast(new HttpObjectAggregator(1000000));
+        p.addLast(new WriteToOutboundChannelHandler(null));
     }
 }
