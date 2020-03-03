@@ -28,11 +28,8 @@ public class WriteToOutboundChannelHandler extends ChannelInboundHandlerAdapter 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         System.out.println(msg.getClass());
-        FullHttpRequest raw=(FullHttpRequest)msg;
-        FullHttpRequest request=new DefaultFullHttpRequest(raw.protocolVersion(),raw.method(),raw.uri(),raw.content());
-        request.headers().add(raw.headers());
         if (outboundChannel.isActive() && msg instanceof HttpObject) {
-            outboundChannel.writeAndFlush(request);
+            outboundChannel.writeAndFlush(msg);
         } else {
             ReferenceCountUtil.release(msg);
         }
