@@ -104,8 +104,8 @@ public class HttpProxyConnectHandler extends SimpleChannelInboundHandler<HttpObj
                                         outboundChannel.pipeline().addLast(new HttpRequestEncoder());
                                         outboundChannel.pipeline().addLast(new LoggingHandler(LogLevel.INFO));
                                         outboundChannel.pipeline().addLast(new RelayHandler(ctx.channel()));
-                                        WriteToOutboundChannelHandler writeToOutboundChannelHandler = new WriteToOutboundChannelHandler(outboundChannel);
-                                        ctx.pipeline().addLast(writeToOutboundChannelHandler);
+                                        RelayHandler clientEndtoRemoteHandler = new RelayHandler(outboundChannel);
+                                        ctx.pipeline().addLast(clientEndtoRemoteHandler);
                                         request.headers().forEach(System.out::println);
 
                                         String proxyConnection=request.headers().get("Proxy-Connection");
@@ -120,10 +120,10 @@ public class HttpProxyConnectHandler extends SimpleChannelInboundHandler<HttpObj
                                         request.setUri(url);
 
                                         //出于未知的原因，不知道为什么fireChannelread不行
-                                        writeToOutboundChannelHandler.channelRead(ctx,request);
+                                        clientEndtoRemoteHandler.channelRead(ctx,request);
                                         contents.forEach(content->{
                                             try {
-                                                writeToOutboundChannelHandler.channelRead(ctx,content);
+                                                clientEndtoRemoteHandler.channelRead(ctx,content);
                                             } catch (Exception e) {
                                                 e.printStackTrace();
                                             }
